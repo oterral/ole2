@@ -56,12 +56,48 @@ class ModifyControl extends Control {
 
     this.selectStyle = options.style;
 
+    this.selectInteraction = new ol.interaction.Select({
+      layers: this.layerFilter,
+      features: this.features,
+      style: this.selectStyle,
+    });
+
+    if (options.style) {
+      window.console.log(this.selectInteraction.getFeatures());
+      // Apply the select style dynamically when the feature has its own style.
+      this.selectInteraction.getFeatures().on('add', (evt) => {
+        this.feature = evt.element;
+        this.editor.setEditFeature(this.feature);
+        this.setModifyActive();
+
+        // Apply the select style dynamically when the feature has its own style.
+        if (this.feature && this.feature.getStyleFunction() && this.selectStyle) {
+          const featureStyles = getStyles(this.feature.getStyleFunction());
+          const selectStyles = getStyles(this.selectStyle, this.feature);
+          this.feature.setStyle(featureStyles.concat(selectStyles));
+        }
+      });
+
+      // Remove the select style dynamically when the feature had its own style.
+      this.selectInteraction.getFeatures().on('selected', () => {
+        if (this.feature.getStyleFunction() && this.selectStyle) {
+          const styles = getStyles(this.feature.getStyleFunction(), null);
+          const selectStyles = getStyles(this.selectStyle, this.feature);
+          this.feature.setStyle(styles.slice(0, styles.indexOf(selectStyles[0])));
+        }
+
+        this.setModifyActive();
+        this.editor.setEditFeature(null);
+        this.feature = null;
+      });
+    }
+
     /**
      * @type {ol.interaction.Modify}
      * @private
      */
     this.modifyInteraction = new ol.interaction.Modify({
-      source: this.source,
+      features: this.selectInteraction.getFeatures(),
       style: options.modifyStyle,
     });
 
@@ -73,7 +109,7 @@ class ModifyControl extends Control {
       handleDownEvent: this.startMoveFeature.bind(this),
       handleDragEvent: this.moveFeature.bind(this),
       handleUpEvent: this.stopMoveFeature.bind(this),
-      handleMoveEvent: this.selectFeature.bind(this),
+      handleMoveEvent: this.setModifyActive.bind(this),
     });
   }
 
@@ -85,7 +121,7 @@ class ModifyControl extends Control {
   deleteFeature(evt) {
     if (evt.key === 'Delete' && this.feature) {
       this.source.removeFeature(this.feature);
-      this.feature = null;
+      this.selectInteraction.getFeatures().clear();
     }
   }
 
@@ -130,9 +166,18 @@ class ModifyControl extends Control {
    */
   stopMoveFeature() {
     this.coordinate = null;
-    this.feature = null;
-    this.editor.setEditFeature(null);
     return false;
+  }
+
+  /**
+   * Handle the move event of the move interaction.
+   * @private
+   */
+  setModifyActive() {
+    window.console.log(this.selectInteraction.getFeatures().getLength());
+    window.console.log(this.modifyInteraction.getOverlay().getSource().getFeatures().length);
+    this.modifyActive = this.modifyInteraction.getOverlay()
+      .getSource().getFeatures().length > 0;
   }
 
   /**
@@ -201,6 +246,7 @@ class ModifyControl extends Control {
     document.addEventListener('keydown', this.deleteFeature.bind(this));
     this.map.addInteraction(this.modifyInteraction);
     this.map.addInteraction(this.moveInteraction);
+    this.map.addInteraction(this.selectInteraction);
     super.activate();
   }
 
@@ -208,9 +254,11 @@ class ModifyControl extends Control {
    * @inheritdoc
    */
   deactivate(silent) {
+    this.selectInteraction.getFeatures().clear();
     document.removeEventListener('keydown', this.deleteFeature.bind(this));
     this.map.removeInteraction(this.modifyInteraction);
     this.map.removeInteraction(this.moveInteraction);
+    this.map.removeInteraction(this.selectInteraction);
     super.deactivate(silent);
   }
 }
